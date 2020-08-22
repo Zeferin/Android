@@ -18,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
@@ -38,20 +39,13 @@ class MainActivity : AppCompatActivity() {
     private var currentPhotoUri: Uri? = null
     private var currentPhotoPath: String? = null
 
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        lifecycleScope.launch{
-            Log.d("Version", ""+ Build.VERSION.SDK_INT)
-            initOpenVideoButton(findViewById(R.id.openVideo))
-            initOpenPhotoButton(findViewById(R.id.openPhoto))
-            initCaptureVideoButton(findViewById(R.id.captureVideo))
-
-            // potentially blocking operation (create file&directory)
-            // the button click will have no effect until this coroutine finishes its job. Then the user will have to click again
-            initCapturePhotoButton(findViewById(R.id.capturePhoto))
-        }
+        initOpenVideoButton(findViewById(R.id.openVideo))
+        initOpenPhotoButton(findViewById(R.id.openPhoto))
+        initCaptureVideoButton(findViewById(R.id.captureVideo))
+        initCapturePhotoButton(findViewById(R.id.capturePhoto))
     }
 
     private fun initCapturePhotoButton(takePhoto: Button) {
@@ -64,26 +58,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun capturePhoto() {
-        Intent(MediaStore.ACTION_IMAGE_CAPTURE).also { takePictureIntent ->
-            // Ensure that there's a camera activity to handle the intent
-            takePictureIntent.resolveActivity(packageManager)?.also {
-                if (Build.VERSION.SDK_INT < 29)
-                    createFileForImageExport(takePictureIntent)
-                else
-                {
-                    val resolver: ContentResolver = getContentResolver()
-                    val contentValues = ContentValues()
-                    contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME,  generateImageSuffix())
-                    contentValues.put(MediaStore.MediaColumns.MIME_TYPE,     "image/png")
-                    contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM)
-                    currentPhotoUri =
-                        resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-                    Log.d("resultedUri","imageUri")
-                    //   fos = resolver.openOutputStream(imageUri!!)
-                    Log.d("fileCreationUri", currentPhotoUri.toString())
-                    currentPhotoPath = currentPhotoUri?.path;
-                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, currentPhotoUri)
-                    startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
+        lifecycleScope.launch {
+            Intent(MediaStore.ACTION_IMAGE_CAPTURE).also { takePictureIntent ->
+                // Ensure that there's a camera activity to handle the intent
+                takePictureIntent.resolveActivity(packageManager)?.also {
+                    if (Build.VERSION.SDK_INT < 29)
+                        createFileForImageExport(takePictureIntent)
+                    else {
+                        val resolver: ContentResolver = getContentResolver()
+                        val contentValues = ContentValues()
+                        contentValues.put(
+                            MediaStore.MediaColumns.DISPLAY_NAME,
+                            generateImageSuffix()
+                        )
+                        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+                        contentValues.put(
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            Environment.DIRECTORY_DCIM
+                        )
+                        currentPhotoUri = resolver.insert(
+                                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                                contentValues
+                            )
+                        Log.d("resultedUri", "imageUri")
+                        //   fos = resolver.openOutputStream(imageUri!!)
+                        Log.d("fileCreationUri", currentPhotoUri.toString())
+                        currentPhotoPath = currentPhotoUri?.path;
+                        takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, currentPhotoUri)
+                        startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
+                    }
                 }
             }
         }
@@ -116,7 +119,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initCaptureVideoButton(recordVideo: Button) {
+        captureVideo.setOnClickListener {
+            if (checkAndRequestPermissions(
+                    REQUEST_VIDEO_CAPTURE, Manifest.permission.WRITE_EXTERNAL_STORAGE)){
+                captureVideo()
+            }
+        }
+    }
 
+    private fun captureVideo()
+    {
+        lifecycleScope.launch {
+            Intent(MediaStore.ACTION_VIDEO_CAPTURE).also { takeVideoIntent ->
+                takeVideoIntent.resolveActivity(packageManager)?.also {
+                    startActivityForResult(takeVideoIntent, REQUEST_VIDEO_CAPTURE)
+                }
+            }
+        }
     }
 
     private fun initOpenPhotoButton(openPhoto: Button) {
@@ -153,11 +172,12 @@ class MainActivity : AppCompatActivity() {
         if ((grantResults.isNotEmpty() &&
                     grantResults[0] == PackageManager.PERMISSION_GRANTED))
         {
-            when (requestCode) {
-                PERMISSION_CODE_IMAGE ->  pickImageFromGallery()
-                PERMISSION_CODE_VIDEO -> pickVideoFromGallery()
-                PERMISSION_CAPTURE_IMAGE -> capturePhoto()
-            }
+                when (requestCode) {
+                    PERMISSION_CODE_IMAGE -> pickImageFromGallery()
+                    PERMISSION_CODE_VIDEO -> pickVideoFromGallery()
+                    PERMISSION_CAPTURE_IMAGE -> capturePhoto()
+                    REQUEST_VIDEO_CAPTURE -> captureVideo()
+                }
         }
     }
 
@@ -175,31 +195,28 @@ class MainActivity : AppCompatActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode == Activity.RESULT_OK)
         {
-            when (requestCode) {
-                IMAGE_PICK_CODE -> displayFragment(ImageViewFragment(data?.data!!))
-                VIDEO_PICK_CODE -> displayFragment(VideoViewFragment(data?.data!!))
-                REQUEST_IMAGE_CAPTURE -> {
-                    if (Build.VERSION.SDK_INT < 29) {
-                        var f = File(currentPhotoPath)
-                        currentPhotoUri = Uri.fromFile(f)
+            lifecycleScope.launch {
+                when (requestCode) {
+                    IMAGE_PICK_CODE -> displayFragment(ImageViewFragment(data?.data!!))
+                    VIDEO_PICK_CODE -> displayFragment(VideoViewFragment(data?.data!!))
+                    REQUEST_VIDEO_CAPTURE -> displayFragment(VideoViewFragment(data?.data!!))
+                    REQUEST_IMAGE_CAPTURE -> {
+                        if (Build.VERSION.SDK_INT < 29) {
+                            var f = File(currentPhotoPath)
+                            currentPhotoUri = Uri.fromFile(f)
+                            Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).also { mediaScanIntent ->
+                                mediaScanIntent.data = currentPhotoUri
+                                sendBroadcast(mediaScanIntent)
+                            }
+                        }
+                        displayFragment(ImageViewFragment(currentPhotoUri))
                     }
-                    displayImageFromUri()
                 }
-
             }
         }
         else
         {
             Log.d("error","result not ok")
-        }
-    }
-
-    private fun displayImageFromUri() {
-        displayFragment(ImageViewFragment(currentPhotoUri))
-        Log.d("capture", currentPhotoUri.toString())
-        Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE).also { mediaScanIntent ->
-            mediaScanIntent.data = currentPhotoUri
-            sendBroadcast(mediaScanIntent)
         }
     }
 
